@@ -27,29 +27,27 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "joy/joy.hpp"
+
+#include <SDL.h>
+
 #include <algorithm>
 #include <chrono>
 #include <functional>
 #include <future>
 #include <memory>
-#include <stdexcept>
-#include <string>
-#include <thread>
-
-#include <SDL.h>
-
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <sensor_msgs/msg/joy_feedback.hpp>
-
-#include "joy/joy.hpp"
+#include <stdexcept>
+#include <string>
+#include <thread>
 
 namespace joy
 {
 
-Joy::Joy(const rclcpp::NodeOptions & options)
-: rclcpp::Node("joy_node", options)
+Joy::Joy(const rclcpp::NodeOptions & options) : rclcpp::Node("joy_node", options)
 {
   dev_id_ = static_cast<int>(this->declare_parameter("device_id", 0));
 
@@ -99,9 +97,7 @@ Joy::Joy(const rclcpp::NodeOptions & options)
   pub_ = create_publisher<sensor_msgs::msg::Joy>("joy", 10);
 
   feedback_sub_ = this->create_subscription<sensor_msgs::msg::JoyFeedback>(
-    "joy/set_feedback", rclcpp::QoS(10), std::bind(
-      &Joy::feedbackCb, this,
-      std::placeholders::_1));
+    "joy/set_feedback", rclcpp::QoS(10), std::bind(&Joy::feedbackCb, this, std::placeholders::_1));
 
   future_ = exit_signal_.get_future();
 
@@ -327,8 +323,7 @@ void Joy::handleJoyDeviceAdded(const SDL_Event & e)
     }
     if (!matching_device_found) {
       RCLCPP_WARN(
-        get_logger(), "Could not get joystick with name %s: %s",
-        dev_name_.c_str(), SDL_GetError());
+        get_logger(), "Could not get joystick with name %s: %s", dev_name_.c_str(), SDL_GetError());
       return;
     }
   }
@@ -381,9 +376,18 @@ void Joy::handleJoyDeviceAdded(const SDL_Event & e)
   // Get the initial state for each of the axes
   for (int i = 0; i < num_axes; ++i) {
     int16_t state;
-    if (SDL_JoystickGetAxisInitialState(joystick_, i, &state)) {
-      joy_msg_.axes.at(i) = convertRawAxisValueToROS(state);
+    if (init_) {
+      joy_msg_.axes.at(i) = 0;
+
+    } else {
+      if (SDL_JoystickGetAxisInitialState(joystick_, i, &state)) {
+        joy_msg_.axes.at(i) = convertRawAxisValueToROS(state);
+      }
     }
+  }
+
+  if (init_) {
+    init_ = false;
   }
 
   haptic_ = SDL_HapticOpenFromJoystick(joystick_);
@@ -398,8 +402,8 @@ void Joy::handleJoyDeviceAdded(const SDL_Event & e)
   }
 
   RCLCPP_INFO(
-    get_logger(), "Opened joystick: %s.  deadzone: %f",
-    SDL_JoystickName(joystick_), scaled_deadzone_);
+    get_logger(), "Opened joystick: %s.  deadzone: %f", SDL_JoystickName(joystick_),
+    scaled_deadzone_);
 }
 
 void Joy::handleJoyDeviceRemoved(const SDL_Event & e)
@@ -463,10 +467,10 @@ void Joy::eventThread()
       // If we are autorepeating and enough time has passed, set should_publish.
       rclcpp::Time now = this->now();
       rclcpp::Duration diff_since_last_publish = now - last_publish;
-      if ((autorepeat_rate_ > 0.0 &&
-        RCL_NS_TO_MS(diff_since_last_publish.nanoseconds()) >= autorepeat_interval_ms_) ||
-        publish_soon_)
-      {
+      if (
+        (autorepeat_rate_ > 0.0 &&
+         RCL_NS_TO_MS(diff_since_last_publish.nanoseconds()) >= autorepeat_interval_ms_) ||
+        publish_soon_) {
         last_publish = now;
         should_publish = true;
         publish_soon_ = false;
